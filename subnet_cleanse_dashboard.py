@@ -1,34 +1,34 @@
 """
-Dashboard de Subnet Cleanse (independiente de SSOT)
-====================================================
+Subnet Cleanse Dashboard (standalone, reads a CSV produced by SSOT)
+====================================================================
 
-QUE HACE:
-  Lee el CSV que ya genera el reporte de reconciliacion de SSOT
-  (ddi_reconciliation_<fecha>.csv) y te muestra 2 vistas:
-    - Caso 1: FREE but IN USE
-    - Caso 2: FREE but REFERENCED
-  Cada fila tiene una columna "Estado" (Pendiente / Solicitado / Resuelto)
-  que tu editas a mano y se guarda en un archivo local (estado_subnets.db),
-  asi no se pierde cuando vuelves a cargar un CSV nuevo el mes siguiente.
+WHAT IT DOES:
+  Reads the CSV produced by SSOT's reconciliation report
+  (ddi_reconciliation_<date>.csv) and shows two tabs:
+    - Case 1: FREE but IN USE
+    - Case 2: FREE but REFERENCED
+  Each row has a "Status" column (Pending / Requested / Resolved) that you
+  edit by hand. It is saved locally (estado_subnets.db) so it is not lost
+  when you upload a new CSV next month.
 
-REQUISITOS (una sola vez, en tu laptop):
+REQUIREMENTS (once, on your laptop):
   pip install -r requirements.txt
 
-COMO OBTENER EL CSV CADA MES (en ssot-dev, por SSH):
+HOW TO GET THE CSV EACH MONTH (on ssot-dev, over SSH):
   cd /opt/dn/ssot
   source venv/bin/activate
   python -m reports.ddi_reconciliation --conflicts-only --csv
-  # esto escribe: reports/ddi_reconciliation/ddi_reconciliation_<fecha>.csv
+  # writes: reports/ddi_reconciliation/ddi_reconciliation_<date>.csv
 
-  Despues bajas ese archivo a tu laptop, por ejemplo con scp (desde tu
-  laptop, en otra terminal):
-  scp usuario@ssot-dev:/dn/ssot/reports/ddi_reconciliation/ddi_reconciliation_<fecha>.csv .
+  Then download it to your laptop, e.g. with scp (from your laptop, in
+  another terminal):
+  scp user@ssot-dev:/dn/ssot/reports/ddi_reconciliation/ddi_reconciliation_<date>.csv .
 
-COMO CORRER EL DASHBOARD (en tu laptop, carpeta donde esta este archivo):
+HOW TO RUN THE DASHBOARD (on your laptop, in this folder):
   streamlit run subnet_cleanse_dashboard.py
 
-  Se abre solo en tu navegador (http://localhost:8501). Ahi subes el CSV
-  que bajaste, desde la barra lateral.
+  Opens automatically in your browser (http://localhost:8501). Upload the
+  CSV from the sidebar.
 """
 
 import sqlite3
@@ -38,7 +38,7 @@ import pandas as pd
 import streamlit as st
 
 DB_PATH = Path(__file__).parent / "estado_subnets.db"
-ESTADOS = ["Pendiente", "Solicitado", "Resuelto"]
+STATUSES = ["Pending", "Requested", "Resolved"]
 
 st.set_page_config(page_title="Subnet Cleanse Dashboard", layout="wide", initial_sidebar_state="expanded")
 
@@ -47,23 +47,12 @@ st.markdown(
     <style>
     .block-container {padding-top: 2rem;}
     div[data-testid="stMetric"] {
-        background-color: #1e2530;
-        border: 1px solid #333c48;
+        background-color: rgba(127, 127, 127, 0.08);
+        border: 1px solid rgba(127, 127, 127, 0.25);
         border-radius: 10px;
         padding: 14px 18px;
     }
     div[data-testid="stMetricLabel"] { font-size: 0.85rem; opacity: 0.8; }
-    .subnet-header {
-        font-size: 1.9rem;
-        font-weight: 700;
-        margin-bottom: 0;
-    }
-    .subnet-subheader {
-        font-size: 1rem;
-        opacity: 0.7;
-        margin-top: -6px;
-        margin-bottom: 1.2rem;
-    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -71,7 +60,7 @@ st.markdown(
 
 
 # ---------------------------------------------------------------------------
-# Estado local (SQLite): recuerda que estado le pusiste a cada subred
+# Local status store (SQLite): remembers what status you set per subnet
 # ---------------------------------------------------------------------------
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -88,14 +77,14 @@ def get_conn():
     return conn
 
 
-def cargar_estados() -> pd.DataFrame:
+def load_status() -> pd.DataFrame:
     conn = get_conn()
     df = pd.read_sql("SELECT * FROM estado", conn)
     conn.close()
     return df
 
 
-def guardar_estados(df: pd.DataFrame):
+def save_status(df: pd.DataFrame):
     conn = get_conn()
     for _, row in df.iterrows():
         conn.execute(
@@ -107,126 +96,99 @@ def guardar_estados(df: pd.DataFrame):
                 nota=excluded.nota,
                 ultima_actualizacion=excluded.ultima_actualizacion
             """,
-            (row["subnet"], row["Estado"], row.get("Nota", "")),
+            (row["subnet"], row["Status"], row.get("Notes", "")),
         )
     conn.commit()
     conn.close()
 
 
 # ---------------------------------------------------------------------------
-# Sidebar: carga de archivo + info del proceso
+# Sidebar: file upload
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.header("Datos")
-    archivo = st.file_uploader("CSV de reconciliacion", type=["csv"])
-    st.caption("Generado en ssot-dev con: `python -m reports.ddi_reconciliation --conflicts-only --csv`")
-    st.divider()
-    st.header("Que es cada caso")
-    st.markdown(
-        "**Caso 1 - FREE but IN USE**\n\n"
-        "La subred esta en uso real pero 1DDI no se actualizo. "
-        "Accion: corregir el Site ID en 1DDI.\n\n"
-        "**Caso 2 - FREE but REFERENCED**\n\n"
-        "La subred no esta en uso, pero quedan objetos/reglas de firewall "
-        "(FMC) referenciandola. Accion: pedir borrado al equipo de firewall."
-    )
+    st.header("Data")
+    uploaded_file = st.file_uploader("Reconciliation CSV", type=["csv"])
+    st.caption("Generated on ssot-dev with: `python -m reports.ddi_reconciliation --conflicts-only --csv`")
 
-st.markdown('<p class="subnet-header">Subnet Cleanse Dashboard</p>', unsafe_allow_html=True)
-st.markdown(
-    '<p class="subnet-subheader">Seguimiento de subredes "FREE" en 1DDI con conflictos reales. '
-    "No modifica nada en SSOT, 1DDI o FMC.</p>",
-    unsafe_allow_html=True,
-)
+st.title("Subnet Cleanse Dashboard")
 
-if archivo is None:
-    st.info("Sube un CSV desde la barra lateral izquierda para ver el dashboard.")
+if uploaded_file is None:
+    st.info("Upload a CSV from the left sidebar to view the dashboard.")
     st.stop()
 
-df = pd.read_csv(archivo)
-estados_guardados = cargar_estados()
+df = pd.read_csv(uploaded_file)
+saved_status = load_status()
 
-df = df.merge(estados_guardados[["subnet", "estado", "nota"]], on="subnet", how="left")
-df["estado"] = df["estado"].fillna("Pendiente")
+df = df.merge(saved_status[["subnet", "estado", "nota"]], on="subnet", how="left")
+df["estado"] = df["estado"].fillna("Pending")
 df["nota"] = df["nota"].fillna("")
 
-caso1_df = df[df["verdict"] == "FREE but IN USE"]
-caso2_df = df[df["verdict"] == "FREE but REFERENCED"]
+case1_df = df[df["verdict"] == "FREE but IN USE"]
+case2_df = df[df["verdict"] == "FREE but REFERENCED"]
 total = len(df)
-resueltas = (df["estado"] == "Resuelto").sum()
-solicitadas = (df["estado"] == "Solicitado").sum()
-pendientes = (df["estado"] == "Pendiente").sum()
+resolved = (df["estado"] == "Resolved").sum()
+pending = (df["estado"] == "Pending").sum()
 
-# --- Fila de metricas -------------------------------------------------------
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Total conflictos", total)
-c2.metric("Caso 1 - IN USE", len(caso1_df))
-c3.metric("Caso 2 - REFERENCED", len(caso2_df))
-c4.metric("Resueltas", int(resueltas), delta=f"{resueltas / total:.0%}" if total else None)
-c5.metric("Pendientes", int(pendientes))
+c1.metric("Total conflicts", total)
+c2.metric("Case 1 - IN USE", len(case1_df))
+c3.metric("Case 2 - REFERENCED", len(case2_df))
+c4.metric("Resolved", int(resolved), delta=f"{resolved / total:.0%}" if total else None)
+c5.metric("Pending", int(pending))
 
 if total:
-    st.progress(resueltas / total, text=f"Progreso general: {resueltas}/{total} resueltas")
+    st.progress(resolved / total, text=f"Overall progress: {resolved}/{total} resolved")
 
 st.write("")
 
 
-def tabla_caso(sub: pd.DataFrame, columnas: list[str], key: str):
+def status_table(sub: pd.DataFrame, columns: list[str], key: str):
     if sub.empty:
-        st.success("Sin subredes pendientes en este caso.")
+        st.success("No subnets in this case.")
         return
 
-    resumen = sub["estado"].value_counts().reindex(ESTADOS, fill_value=0)
+    summary = sub["estado"].value_counts().reindex(STATUSES, fill_value=0)
     m1, m2, m3 = st.columns(3)
-    m1.metric("Pendiente", int(resumen["Pendiente"]))
-    m2.metric("Solicitado", int(resumen["Solicitado"]))
-    m3.metric("Resuelto", int(resumen["Resuelto"]))
+    m1.metric("Pending", int(summary["Pending"]))
+    m2.metric("Requested", int(summary["Requested"]))
+    m3.metric("Resolved", int(summary["Resolved"]))
 
-    filtro = st.multiselect(
-        "Filtrar por estado", ESTADOS, default=ESTADOS, key=f"filtro_{key}"
-    )
-    vista = sub[sub["estado"].isin(filtro)].copy()
-    vista = vista.rename(columns={"estado": "Estado", "nota": "Nota"})
-    editable = vista[["subnet"] + columnas + ["Estado", "Nota"]]
+    status_filter = st.multiselect("Filter by status", STATUSES, default=STATUSES, key=f"filter_{key}")
+    view = sub[sub["estado"].isin(status_filter)].copy()
+    view = view.rename(columns={"estado": "Status", "nota": "Notes"})
+    editable = view[["subnet"] + columns + ["Status", "Notes"]]
 
     edited = st.data_editor(
         editable,
         key=key,
         column_config={
-            "Estado": st.column_config.SelectboxColumn("Estado", options=ESTADOS, required=True),
-            "subnet": st.column_config.TextColumn("Subred", disabled=True),
+            "Status": st.column_config.SelectboxColumn("Status", options=STATUSES, required=True),
+            "subnet": st.column_config.TextColumn("Subnet", disabled=True),
         },
-        disabled=["subnet"] + columnas,
+        disabled=["subnet"] + columns,
         hide_index=True,
         use_container_width=True,
     )
 
-    if st.button("Guardar cambios", key=f"save_{key}", type="primary"):
-        guardar_estados(edited)
-        st.success(f"Guardado ({len(edited)} filas).")
+    if st.button("Save changes", key=f"save_{key}", type="primary"):
+        save_status(edited)
+        st.success(f"Saved ({len(edited)} rows).")
 
 
 tab1, tab2 = st.tabs(
-    [f"Caso 1 - FREE but IN USE ({len(caso1_df)})", f"Caso 2 - FREE but REFERENCED ({len(caso2_df)})"]
+    [f"Case 1 - FREE but IN USE ({len(case1_df)})", f"Case 2 - FREE but REFERENCED ({len(case2_df)})"]
 )
 
 with tab1:
-    st.caption("Accion: confirmar el sitio real (interfaces/rutas/DNS) y corregir el Site ID en 1DDI.")
-    tabla_caso(
-        caso1_df,
-        columnas=["subnet_name", "site_name", "interfaces", "routes", "dns"],
-        key="caso1",
+    status_table(
+        case1_df,
+        columns=["subnet_name", "site_name", "interfaces", "routes", "dns"],
+        key="case1",
     )
 
 with tab2:
-    st.caption("Accion: preparar la solicitud de borrado de objetos/reglas y enviarla al equipo de firewall.")
-    tabla_caso(
-        caso2_df,
-        columnas=["subnet_name", "site_name", "fmc_objects", "fmc_rules", "configs"],
-        key="caso2",
+    status_table(
+        case2_df,
+        columns=["subnet_name", "site_name", "fmc_objects", "fmc_rules", "configs"],
+        key="case2",
     )
-
-st.divider()
-st.caption(
-    "Estado guardado localmente en estado_subnets.db, junto a este script. "
-    "No se borra al subir un CSV nuevo el proximo mes."
-)
