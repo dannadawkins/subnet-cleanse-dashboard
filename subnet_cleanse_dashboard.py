@@ -41,7 +41,7 @@ DB_PATH = Path(__file__).parent / "estado_subnets.db"
 ESTADOS = ["Pendiente", "Solicitado", "Resuelto"]
 
 st.set_page_config(page_title="Subnet Cleanse Dashboard", layout="wide")
-st.title("🧹 Subnet Cleanse Dashboard")
+st.title("Subnet Cleanse Dashboard")
 st.caption("Datos: reporte de reconciliación de SSOT (`ddi_reconciliation`). No modifica nada en SSOT/DDI/FMC.")
 
 
@@ -112,7 +112,7 @@ def tabla_caso(df: pd.DataFrame, verdict: str, columnas: list[str], titulo: str,
     sub = df[df["verdict"] == verdict].copy()
     st.subheader(f"{titulo} ({len(sub)} subredes)")
     if sub.empty:
-        st.write("Sin subredes en este caso. ✅")
+        st.write("Sin subredes en este caso.")
         return
 
     sub = sub.rename(columns={"estado": "Estado", "nota": "Nota"})
@@ -129,7 +129,7 @@ def tabla_caso(df: pd.DataFrame, verdict: str, columnas: list[str], titulo: str,
         use_container_width=True,
     )
 
-    if st.button(f"💾 Guardar cambios — {titulo}", key=f"save_{key}"):
+    if st.button(f"Guardar cambios - {titulo}", key=f"save_{key}"):
         guardar_estados(edited)
         st.success("Guardado.")
 
