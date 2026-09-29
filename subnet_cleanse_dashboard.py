@@ -4,15 +4,15 @@ Dashboard de Subnet Cleanse (independiente de SSOT)
 
 QUE HACE:
   Lee el CSV que ya genera el reporte de reconciliacion de SSOT
-  (ddi_reconciliation_<fecha>.csv) y te muestra 2 tablas:
+  (ddi_reconciliation_<fecha>.csv) y te muestra 2 vistas:
     - Caso 1: FREE but IN USE
     - Caso 2: FREE but REFERENCED
   Cada fila tiene una columna "Estado" (Pendiente / Solicitado / Resuelto)
-  que tu editas a mano y se guarda en un archivo local (estado.db), asi
-  no se pierde cuando vuelves a cargar un CSV nuevo el mes siguiente.
+  que tu editas a mano y se guarda en un archivo local (estado_subnets.db),
+  asi no se pierde cuando vuelves a cargar un CSV nuevo el mes siguiente.
 
 REQUISITOS (una sola vez, en tu laptop):
-  pip install streamlit pandas
+  pip install -r requirements.txt
 
 COMO OBTENER EL CSV CADA MES (en ssot-dev, por SSH):
   cd /opt/dn/ssot
@@ -28,7 +28,7 @@ COMO CORRER EL DASHBOARD (en tu laptop, carpeta donde esta este archivo):
   streamlit run subnet_cleanse_dashboard.py
 
   Se abre solo en tu navegador (http://localhost:8501). Ahi subes el CSV
-  que bajaste, y ya ves las 2 tablas.
+  que bajaste, desde la barra lateral.
 """
 
 import sqlite3
@@ -40,9 +40,34 @@ import streamlit as st
 DB_PATH = Path(__file__).parent / "estado_subnets.db"
 ESTADOS = ["Pendiente", "Solicitado", "Resuelto"]
 
-st.set_page_config(page_title="Subnet Cleanse Dashboard", layout="wide")
-st.title("Subnet Cleanse Dashboard")
-st.caption("Datos: reporte de reconciliación de SSOT (`ddi_reconciliation`). No modifica nada en SSOT/DDI/FMC.")
+st.set_page_config(page_title="Subnet Cleanse Dashboard", layout="wide", initial_sidebar_state="expanded")
+
+st.markdown(
+    """
+    <style>
+    .block-container {padding-top: 2rem;}
+    div[data-testid="stMetric"] {
+        background-color: #1e2530;
+        border: 1px solid #333c48;
+        border-radius: 10px;
+        padding: 14px 18px;
+    }
+    div[data-testid="stMetricLabel"] { font-size: 0.85rem; opacity: 0.8; }
+    .subnet-header {
+        font-size: 1.9rem;
+        font-weight: 700;
+        margin-bottom: 0;
+    }
+    .subnet-subheader {
+        font-size: 1rem;
+        opacity: 0.7;
+        margin-top: -6px;
+        margin-bottom: 1.2rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -89,73 +114,119 @@ def guardar_estados(df: pd.DataFrame):
 
 
 # ---------------------------------------------------------------------------
-# Cargar el CSV de reconciliación
+# Sidebar: carga de archivo + info del proceso
 # ---------------------------------------------------------------------------
-archivo = st.file_uploader(
-    "Sube el CSV de reconciliación (ddi_reconciliation_<fecha>.csv)", type=["csv"]
+with st.sidebar:
+    st.header("Datos")
+    archivo = st.file_uploader("CSV de reconciliacion", type=["csv"])
+    st.caption("Generado en ssot-dev con: `python -m reports.ddi_reconciliation --conflicts-only --csv`")
+    st.divider()
+    st.header("Que es cada caso")
+    st.markdown(
+        "**Caso 1 - FREE but IN USE**\n\n"
+        "La subred esta en uso real pero 1DDI no se actualizo. "
+        "Accion: corregir el Site ID en 1DDI.\n\n"
+        "**Caso 2 - FREE but REFERENCED**\n\n"
+        "La subred no esta en uso, pero quedan objetos/reglas de firewall "
+        "(FMC) referenciandola. Accion: pedir borrado al equipo de firewall."
+    )
+
+st.markdown('<p class="subnet-header">Subnet Cleanse Dashboard</p>', unsafe_allow_html=True)
+st.markdown(
+    '<p class="subnet-subheader">Seguimiento de subredes "FREE" en 1DDI con conflictos reales. '
+    "No modifica nada en SSOT, 1DDI o FMC.</p>",
+    unsafe_allow_html=True,
 )
 
 if archivo is None:
-    st.info("Sube un CSV para ver el dashboard. Instrucciones de cómo generarlo arriba, en el docstring del script.")
+    st.info("Sube un CSV desde la barra lateral izquierda para ver el dashboard.")
     st.stop()
 
 df = pd.read_csv(archivo)
 estados_guardados = cargar_estados()
 
-# Une el estado guardado (si existe) con los datos del CSV
 df = df.merge(estados_guardados[["subnet", "estado", "nota"]], on="subnet", how="left")
 df["estado"] = df["estado"].fillna("Pendiente")
 df["nota"] = df["nota"].fillna("")
 
+caso1_df = df[df["verdict"] == "FREE but IN USE"]
+caso2_df = df[df["verdict"] == "FREE but REFERENCED"]
+total = len(df)
+resueltas = (df["estado"] == "Resuelto").sum()
+solicitadas = (df["estado"] == "Solicitado").sum()
+pendientes = (df["estado"] == "Pendiente").sum()
 
-def tabla_caso(df: pd.DataFrame, verdict: str, columnas: list[str], titulo: str, key: str):
-    sub = df[df["verdict"] == verdict].copy()
-    st.subheader(f"{titulo} ({len(sub)} subredes)")
+# --- Fila de metricas -------------------------------------------------------
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("Total conflictos", total)
+c2.metric("Caso 1 - IN USE", len(caso1_df))
+c3.metric("Caso 2 - REFERENCED", len(caso2_df))
+c4.metric("Resueltas", int(resueltas), delta=f"{resueltas / total:.0%}" if total else None)
+c5.metric("Pendientes", int(pendientes))
+
+if total:
+    st.progress(resueltas / total, text=f"Progreso general: {resueltas}/{total} resueltas")
+
+st.write("")
+
+
+def tabla_caso(sub: pd.DataFrame, columnas: list[str], key: str):
     if sub.empty:
-        st.write("Sin subredes en este caso.")
+        st.success("Sin subredes pendientes en este caso.")
         return
 
-    sub = sub.rename(columns={"estado": "Estado", "nota": "Nota"})
-    editable = sub[["subnet"] + columnas + ["Estado", "Nota"]]
+    resumen = sub["estado"].value_counts().reindex(ESTADOS, fill_value=0)
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Pendiente", int(resumen["Pendiente"]))
+    m2.metric("Solicitado", int(resumen["Solicitado"]))
+    m3.metric("Resuelto", int(resumen["Resuelto"]))
+
+    filtro = st.multiselect(
+        "Filtrar por estado", ESTADOS, default=ESTADOS, key=f"filtro_{key}"
+    )
+    vista = sub[sub["estado"].isin(filtro)].copy()
+    vista = vista.rename(columns={"estado": "Estado", "nota": "Nota"})
+    editable = vista[["subnet"] + columnas + ["Estado", "Nota"]]
 
     edited = st.data_editor(
         editable,
         key=key,
         column_config={
             "Estado": st.column_config.SelectboxColumn("Estado", options=ESTADOS, required=True),
+            "subnet": st.column_config.TextColumn("Subred", disabled=True),
         },
         disabled=["subnet"] + columnas,
         hide_index=True,
         use_container_width=True,
     )
 
-    if st.button(f"Guardar cambios - {titulo}", key=f"save_{key}"):
+    if st.button("Guardar cambios", key=f"save_{key}", type="primary"):
         guardar_estados(edited)
-        st.success("Guardado.")
+        st.success(f"Guardado ({len(edited)} filas).")
 
 
-# --- Caso 1: FREE but IN USE -------------------------------------------------
-tabla_caso(
-    df,
-    verdict="FREE but IN USE",
-    columnas=["subnet_name", "site_name", "interfaces", "routes", "dns"],
-    titulo="Caso 1 — FREE but IN USE (corregir Site ID en 1DDI)",
-    key="caso1",
+tab1, tab2 = st.tabs(
+    [f"Caso 1 - FREE but IN USE ({len(caso1_df)})", f"Caso 2 - FREE but REFERENCED ({len(caso2_df)})"]
 )
 
-st.divider()
+with tab1:
+    st.caption("Accion: confirmar el sitio real (interfaces/rutas/DNS) y corregir el Site ID en 1DDI.")
+    tabla_caso(
+        caso1_df,
+        columnas=["subnet_name", "site_name", "interfaces", "routes", "dns"],
+        key="caso1",
+    )
 
-# --- Caso 2: FREE but REFERENCED --------------------------------------------
-tabla_caso(
-    df,
-    verdict="FREE but REFERENCED",
-    columnas=["subnet_name", "site_name", "fmc_objects", "fmc_rules", "configs"],
-    titulo="Caso 2 — FREE but REFERENCED (pedir borrado en FMC)",
-    key="caso2",
-)
+with tab2:
+    st.caption("Accion: preparar la solicitud de borrado de objetos/reglas y enviarla al equipo de firewall.")
+    tabla_caso(
+        caso2_df,
+        columnas=["subnet_name", "site_name", "fmc_objects", "fmc_rules", "configs"],
+        key="caso2",
+    )
 
 st.divider()
 st.caption(
     "Estado guardado localmente en estado_subnets.db, junto a este script. "
-    "No se borra al subir un CSV nuevo el próximo mes."
+    "No se borra al subir un CSV nuevo el proximo mes."
 )
