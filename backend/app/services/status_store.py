@@ -1,11 +1,12 @@
-import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from app.config import config
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DB_PATH = Path(os.environ.get("SUBNET_CLEANSE_DB", PROJECT_ROOT / "estado_subnets.db"))
+DB_PATH = Path(config("SUBNET_CLEANSE_DB", default="") or PROJECT_ROOT / "estado_subnets.db")
 
 
 def connect() -> sqlite3.Connection:

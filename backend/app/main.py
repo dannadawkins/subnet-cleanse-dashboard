@@ -1,6 +1,5 @@
 import asyncio
 import ipaddress
-import os
 from typing import Literal
 
 import httpx
@@ -9,13 +8,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from app.config import config
 from app.services import site_id_client, ssot_client, status_store
 from app.services.reconciliation import merge_persisted_data, parse_reconciliation_csv
+from app.services.rename_requests import build_rename_requests_csv
 
 Status = Literal["Pending", "Requested", "Resolved"]
 ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.environ.get("FRONTEND_ORIGINS", "http://localhost:3000").split(",")
+    for origin in config("FRONTEND_ORIGINS", default="http://localhost:3000").split(",")
     if origin.strip()
 ]
 
@@ -42,6 +43,23 @@ class SiteIdBatch(BaseModel):
 
 class FmcRequest(BaseModel):
     subnets: list[str] = Field(min_length=1, max_length=200)
+
+
+class Case1Row(BaseModel):
+    subnet: str = Field(min_length=1, max_length=64)
+    subnet_name: str = Field(default="", max_length=500)
+    site: str = Field(default="", max_length=64)
+    suggested_site: str = Field(default="", max_length=64)
+    confidence: str = Field(default="", max_length=64)
+    interfaces: str = Field(default="", max_length=64)
+    routes: str = Field(default="", max_length=64)
+    dns: str = Field(default="", max_length=64)
+    status: Status = "Pending"
+    notes: str = Field(default="", max_length=2000)
+
+
+class RenameRequestExport(BaseModel):
+    rows: list[Case1Row] = Field(min_length=1, max_length=5000)
 
 
 @app.get("/api/health")
@@ -126,6 +144,16 @@ async def lookup_site_ids(request: SiteIdBatch) -> dict:
 
     results = await asyncio.gather(*(lookup(subnet) for subnet in unique_subnets))
     return {"results": results}
+
+
+@app.post("/api/case1/rename-requests")
+def case1_rename_requests(request: RenameRequestExport) -> Response:
+    content = build_rename_requests_csv(row.model_dump() for row in request.rows)
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="rename_requests.csv"'},
+    )
 
 
 @app.post("/api/fmc/analyze")

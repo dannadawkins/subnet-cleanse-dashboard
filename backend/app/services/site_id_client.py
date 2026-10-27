@@ -1,8 +1,8 @@
-import os
-
 import httpx
 
-SITE_ID_API = os.environ.get("SITE_ID_API", "http://localhost:8800")
+from app.config import config
+
+SITE_ID_API = config("SITE_ID_API", default="http://localhost:8800")
 
 
 async def lookup_site(subnet: str) -> dict:

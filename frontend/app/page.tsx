@@ -183,28 +183,44 @@ export default function Home() {
     }
   }
 
+  async function downloadFile(path: string, body: unknown, fallbackName: string) {
+    const response = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      throw new Error(errorBody?.detail ?? `Request failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? fallbackName;
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportRenameRequests() {
+    setError("");
+    setBusy("Preparing 1DDI rename list…");
+    try {
+      await downloadFile("/api/case1/rename-requests", { rows: data?.cases.case1 ?? [] }, "rename_requests.csv");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not export the rename list.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function downloadWorkbooks() {
     setError("");
     setBusy("Generating FMC workbooks…");
     try {
-      const response = await fetch(`${API_BASE}/api/fmc/workbooks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subnets: selected }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new Error(body?.detail ?? `Request failed (${response.status})`);
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get("Content-Disposition") ?? "";
-      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? "fmc_workbooks.zip";
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      await downloadFile("/api/fmc/workbooks", { subnets: selected }, "fmc_workbooks.zip");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not generate FMC workbooks.");
     } finally {
@@ -273,10 +289,17 @@ export default function Home() {
               </label>
             </div>
 
-            {activeCase === "case1" && noSiteSubnets.length > 0 && (
-              <button className="secondary-button" disabled={Boolean(busy)} onClick={suggestSites}>
-                Suggest Site IDs for {noSiteSubnets.length} generic pool(s)
-              </button>
+            {activeCase === "case1" && rows.length > 0 && (
+              <div className="fmc-toolbar">
+                {noSiteSubnets.length > 0 && (
+                  <button className="secondary-button" disabled={Boolean(busy)} onClick={suggestSites}>
+                    Suggest Site IDs for {noSiteSubnets.length} generic pool(s)
+                  </button>
+                )}
+                <button className="primary-button" disabled={Boolean(busy)} onClick={exportRenameRequests}>
+                  Export 1DDI rename list (CSV)
+                </button>
+              </div>
             )}
 
             {activeCase === "case2" && rows.length > 0 && (

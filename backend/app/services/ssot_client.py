@@ -1,16 +1,18 @@
-import os
 import re
 from pathlib import Path
 
 import httpx
 from fastapi import HTTPException
 
-SSOT_HOST = os.environ.get("SSOT_HOST", "https://ssot.dn.pgn.philips.com:8555").rstrip("/")
-SSOT_TIMEOUT = float(os.environ.get("SSOT_TIMEOUT", "600"))
-SSOT_CA_BUNDLE = os.environ.get("SSOT_CA_BUNDLE")
+from app.config import config
+
+SSOT_HOST = config("SSOT_HOST", default="https://ssot.dn.pgn.philips.com:8555").rstrip("/")
+SSOT_TIMEOUT = config("SSOT_TIMEOUT", default=600.0, cast=float)
+SSOT_CA_BUNDLE = config("SSOT_CA_BUNDLE", default="")
 TLS_VERIFY: bool | str = str(Path(SSOT_CA_BUNDLE)) if SSOT_CA_BUNDLE else True
 WORKBOOK_DIR = Path(
-    os.environ.get("FMC_WORKBOOK_DIR", Path(__file__).resolve().parents[4] / "data" / "fmc_workbooks")
+    config("FMC_WORKBOOK_DIR", default="")
+    or Path(__file__).resolve().parents[4] / "data" / "fmc_workbooks"
 )
 BATCH_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 
@@ -23,7 +25,7 @@ def save_workbook_copy(batch_id: str, content: bytes) -> Path:
 
 
 def _client() -> httpx.AsyncClient:
-    api_key = os.environ.get("SSOT_API_KEY", "")
+    api_key = config("SSOT_API_KEY", default="")
     if not api_key:
         raise HTTPException(503, "Configure SSOT_API_KEY on the backend to use FMC decommission.")
     return httpx.AsyncClient(

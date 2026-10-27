@@ -16,7 +16,9 @@ Python business services:
 ## Features
 
 - **Case 1 — FREE but IN USE:** view the subnet and evidence; request a Site ID
-  suggestion for generic pools using the existing Site ID service.
+  suggestion for generic pools using the existing Site ID service; export the
+  1DDI rename list (`rename_requests.csv`) with the proposed name and action
+  for each subnet (rename, confirm suggested site, or investigate).
 - **Case 2 — FREE but REFERENCED:** select subnets, analyze FMC rules, and
   download the generated workbook ZIP.
 - **Monthly tracking:** set a subnet to Pending, Requested, or Resolved and
@@ -34,10 +36,13 @@ From the repository root in PowerShell:
 py -m venv backend\.venv
 backend\.venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
-$env:SITE_ID_API = "http://localhost:8800"
-$env:SSOT_API_KEY = "<your SSOT API key>"
+Copy-Item backend\.env.example backend\.env   # first time only; then fill in SSOT_API_KEY
 uvicorn app.main:app --app-dir backend --reload --port 8000
 ```
+
+Configuration is read from `backend\.env` (python-decouple); environment
+variables set in the terminal take precedence. `backend\.env` is ignored by
+git.
 
 The existing Site ID service must also be running in WSL on port `8800` (see
 `..\api\start_api.sh`). To use the SSOT service's trusted certificate, set
@@ -73,6 +78,7 @@ backend accepts UTF-8 CSV files up to 25 MB.
 | `PUT /api/status` | Persist a subnet's status and note |
 | `GET /api/site-id?subnet=...` | Look up one Site ID |
 | `POST /api/site-id/batch` | Look up Site IDs for generic pools |
+| `POST /api/case1/rename-requests` | Download the Case 1 1DDI rename list (CSV) |
 | `POST /api/fmc/analyze` | Analyze firewall rules through SSOT |
 | `POST /api/fmc/workbooks` | Generate and download FMC workbooks through SSOT |
 
