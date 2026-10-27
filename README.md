@@ -28,6 +28,22 @@ Python business services:
 
 ## Run locally
 
+### Quick start (one command)
+
+From the repository root in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+The script starts the Site ID service (WSL, port `8800`), the FastAPI backend
+(port `8000`) and the Next.js frontend (port `3000`), then opens the browser.
+It creates the backend virtual environment and installs frontend packages the
+first time. Press **Ctrl+C** to stop everything. Logs are written to `logs\`.
+All services listen on `127.0.0.1` only.
+
+The sections below describe how to start each service manually.
+
 ### 1. Start the FastAPI backend
 
 From the repository root in PowerShell:
