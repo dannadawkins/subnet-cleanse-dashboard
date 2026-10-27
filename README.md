@@ -101,7 +101,3 @@ backend/
 frontend/
   app/                       Next.js user interface
 ```
-
-`legacy/` contains the previous Streamlit implementation for reference. It is
-not part of the active application; use the Next.js + FastAPI instructions
-above.
