@@ -1,49 +1,101 @@
-# Subnet Cleanse Dashboard
+# Subnet Cleanse
 
-Dashboard local para dar seguimiento a la limpieza de subredes marcadas
-"FREE" en 1DDI que en realidad tienen conflictos, detectados por el
-reporte de reconciliación de SSOT (`ddi_reconciliation`).
+Web application for tracking subnet discrepancies found in SSOT's
+`ddi_reconciliation` report. The target architecture separates the UI from
+Python business services:
 
-Es una herramienta **independiente de SSOT** — solo lee el CSV que ese
-reporte ya genera; no se conecta ni escribe nada en SSOT, 1DDI o FMC.
+- **Frontend:** Next.js + React + TypeScript. It renders reconciliation data
+  and calls the REST API; it does not classify subnets, store credentials, or
+  call SSOT directly.
+- **Backend:** Python + FastAPI. It parses and classifies the CSV, persists
+  statuses and Site ID suggestions in SQLite, and brokers Site ID/FMC API
+  requests.
+- **SSOT:** used read-only. Changes to 1DDI and firewalls continue through the
+  owning teams' normal change process.
 
-## Casos que muestra
+## Features
 
-- **Caso 1 — FREE but IN USE**: la subred está en uso real, pero 1DDI no
-  se actualizó. Acción: corregir el Site ID en 1DDI.
-- **Caso 2 — FREE but REFERENCED**: la subred no está en uso, pero quedan
-  objetos/reglas de firewall (FMC) referenciándola. Acción: pedir borrado
-  al equipo de firewall.
+- **Case 1 — FREE but IN USE:** view the subnet and evidence; request a Site ID
+  suggestion for generic pools using the existing Site ID service.
+- **Case 2 — FREE but REFERENCED:** select subnets, analyze FMC rules, and
+  download the generated workbook ZIP.
+- **Monthly tracking:** set a subnet to Pending, Requested, or Resolved and
+  add a note/ticket reference. The backend persists the state in the existing
+  `estado_subnets.db`, keyed by subnet, so it remains when a new CSV is loaded.
+- **Site ID lookup:** request a suggestion for any IPv4 subnet.
 
-Cada subred tiene una columna **Estado** (Pendiente / Solicitado /
-Resuelto) que se guarda localmente en `estado_subnets.db` y no se pierde
-al cargar un CSV nuevo el mes siguiente.
+## Run locally
 
-## Requisitos
+### 1. Start the FastAPI backend
 
-```bash
-pip install -r requirements.txt
+From the repository root in PowerShell:
+
+```powershell
+py -m venv backend\.venv
+backend\.venv\Scripts\Activate.ps1
+pip install -r backend\requirements.txt
+$env:SITE_ID_API = "http://localhost:8800"
+$env:SSOT_API_KEY = "<your SSOT API key>"
+uvicorn app.main:app --app-dir backend --reload --port 8000
 ```
 
-## Cómo obtener el CSV cada mes (en ssot-dev, por SSH)
+The existing Site ID service must also be running in WSL on port `8800` (see
+`..\api\start_api.sh`). To use the SSOT service's trusted certificate, set
+`SSOT_CA_BUNDLE` to the certificate bundle path available to the backend.
+The backend verifies TLS by default; API keys are kept on the backend and are
+never sent to the browser. Do not commit credentials or certificate files.
 
-```bash
-cd /opt/dn/ssot
-source venv/bin/activate
-python -m reports.ddi_reconciliation --conflicts-only --csv
+SQLite defaults to `estado_subnets.db` in the repository root, reusing the
+existing status and suggestion tables. Set `SUBNET_CLEANSE_DB` to use another
+database file. Set `FRONTEND_ORIGINS` to a comma-separated list when the
+frontend is not running on `http://localhost:3000`.
+
+### 2. Start the Next.js frontend
+
+In a second terminal:
+
+```powershell
+cd frontend
+npm install
+$env:NEXT_PUBLIC_API_BASE_URL = "http://localhost:8000"
+npm run dev
 ```
 
-Esto escribe `reports/ddi_reconciliation/ddi_reconciliation_<fecha>.csv`.
-Bájalo a tu laptop, por ejemplo:
+Open `http://localhost:3000` and upload the daily reconciliation CSV. The
+backend accepts UTF-8 CSV files up to 25 MB.
 
-```bash
-scp usuario@ssot-dev:/dn/ssot/reports/ddi_reconciliation/ddi_reconciliation_<fecha>.csv .
+## API routes
+
+| Route | Purpose |
+|---|---|
+| `GET /api/health` | Backend health check |
+| `POST /api/reconciliation` | Upload, filter, and enrich the reconciliation CSV |
+| `PUT /api/status` | Persist a subnet's status and note |
+| `GET /api/site-id?subnet=...` | Look up one Site ID |
+| `POST /api/site-id/batch` | Look up Site IDs for generic pools |
+| `POST /api/fmc/analyze` | Analyze firewall rules through SSOT |
+| `POST /api/fmc/workbooks` | Generate and download FMC workbooks through SSOT |
+
+Interactive API documentation is available at `http://localhost:8000/docs`.
+
+Run the backend tests from the repository root:
+
+```powershell
+Set-Location backend
+python -m unittest discover -s tests -v
 ```
 
-## Cómo correr el dashboard
+## Repository layout
 
-```bash
-streamlit run subnet_cleanse_dashboard.py
+```text
+backend/
+  app/main.py                FastAPI routes and request validation
+  app/services/              CSV, SQLite, Site ID, and SSOT integrations
+  tests/                     Backend service tests
+frontend/
+  app/                       Next.js user interface
 ```
 
-Se abre en `http://localhost:8501`. Sube ahí el CSV descargado.
+`legacy/` contains the previous Streamlit implementation for reference. It is
+not part of the active application; use the Next.js + FastAPI instructions
+above.

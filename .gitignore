@@ -4,3 +4,10 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+frontend/node_modules/
+frontend/.next/
+frontend/tsconfig.tsbuildinfo
+backend/.venv/
+.env
+.env.*
+!.env.example
